@@ -1,10 +1,11 @@
 # API供应商环境切换工具 v2.0
 
-这个工具可以帮助开发者快速切换不同的AI API供应商配置，支持OpenAI和Claude API。完全向后兼容原始的 `switch_openai_env.sh` 脚本。
+这个工具可以帮助开发者快速切换不同的AI API供应商配置，支持OpenAI和Claude API。**v2.0 新增多API并存功能**，支持同时配置多个API环境。
 
 ## 功能特性
 
 - 🔄 快速切换不同API供应商
+- 🤝 **多API并存**：OpenAI和Claude API可以同时配置
 - 📝 配置文件驱动，易于管理
 - 🔒 安全的API密钥处理
 - ✅ 配置验证和错误处理
@@ -31,10 +32,22 @@ api_url=https://api.your-vendor.com
 
 ## 使用方法
 
-### 切换到指定供应商
+### 传统模式（单API切换）
 ```bash
 ./ai-env-manager openai-official
 ./ai-env-manager claude-official
+```
+
+### 🆕 多API并存模式
+```bash
+# 设置第一个API
+source ./ai-env-manager deepseek
+
+# 添加第二个API（不会清除第一个）
+source ./ai-env-manager --add-only claude-official
+
+# 查看两个API都已配置
+./ai-env-manager --status
 ```
 
 ### 查看当前状态
@@ -45,6 +58,11 @@ api_url=https://api.your-vendor.com
 ### 列出所有可用供应商
 ```bash
 ./ai-env-manager --list
+```
+
+### 验证API环境配置
+```bash
+./ai-env-manager --validate
 ```
 
 ### 显示帮助信息
@@ -73,6 +91,40 @@ model=模型名称 (可选，仅OpenAI类型)
 
 - `openai`: 设置 `OPENAI_API_KEY`、`OPENAI_BASE_URL` 和 `OPENAI_MODEL` 环境变量
 - `claude`: 设置 `ANTHROPIC_AUTH_TOKEN` 和 `ANTHROPIC_BASE_URL` 环境变量
+
+## 🆕 多API并存特性
+
+### 环境变量管理
+v2.0版本支持OpenAI和Claude API环境变量同时设置，互不冲突：
+
+```bash
+# 同时使用两个API
+echo $OPENAI_API_KEY        # 已设置
+echo $ANTHROPIC_AUTH_TOKEN  # 也已设置
+```
+
+### 使用场景
+- **开发环境**：同时测试不同API的响应
+- **应用集成**：在同一应用中使用多个AI服务
+- **成本优化**：根据任务类型选择不同的API
+- **备份方案**：主API不可用时快速切换
+
+### 状态显示
+```bash
+$ ./ai-env-manager --status
+当前API环境状态：
+
+  ● OpenAI: 已配置
+    Base URL: https://api.deepseek.com
+    API Key: 已设置 (***隐藏***)
+    模型: deepseek-chat
+
+  ● Claude: 已配置
+    Base URL: https://api.anthropic.com
+    Auth Token: 已设置 (***隐藏***)
+
+✓ 两个API都已配置，可以同时使用
+```
 
 ## 环境变量
 

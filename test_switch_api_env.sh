@@ -168,7 +168,7 @@ source ./ai-env-manager test-openai > /dev/null 2>&1
 run_test "状态查询" 0 "当前API环境状态" ./ai-env-manager --status
 
 # 测试15: 短参数状态查询
-run_test "短参数状态查询" 0 "类型.*OpenAI" ./ai-env-manager -s
+run_test "短参数状态查询" 0 "● OpenAI.*已配置" ./ai-env-manager -s
 
 # 测试16: OpenAI模型配置
 run_test "OpenAI模型配置" 0 "模型.*test_model" ./ai-env-manager test-openai-with-model
@@ -176,6 +176,19 @@ run_test "OpenAI模型配置" 0 "模型.*test_model" ./ai-env-manager test-opena
 # 测试17: Claude环境变量
 source ./ai-env-manager test-claude > /dev/null 2>&1
 run_test "Claude环境变量" 0 "ANTHROPIC_AUTH_TOKEN.*已设置" ./ai-env-manager --status
+
+# 测试18: 多API并存 - add-only选项
+run_test "add-only选项帮助" 1 "缺少供应商名称" ./ai-env-manager --add-only
+
+# 测试19: 多API并存 - 添加OpenAI到现有Claude环境
+source ./ai-env-manager --add-only test-openai > /dev/null 2>&1
+run_test "多API并存" 0 "两个API都已配置" ./ai-env-manager --status
+
+# 测试20: 验证多API环境
+run_test "多API环境验证" 0 "多API环境验证通过" ./ai-env-manager --validate
+
+# 测试21: 多API状态显示格式
+run_test "多API状态显示" 0 "● OpenAI.*● Claude" ./ai-env-manager --status
 
 # 恢复配置
 restore_config

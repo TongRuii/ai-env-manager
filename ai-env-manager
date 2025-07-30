@@ -149,16 +149,27 @@ show_help() {
     echo "API供应商环境切换工具 v2.0"
     echo ""
     echo "用法:"
-    echo "  ./ai-env-manager <供应商名称>     切换到指定供应商"
-    echo "  ./ai-env-manager --status        显示当前状态"
-    echo "  ./ai-env-manager --list          列出所有可用供应商"
-    echo "  ./ai-env-manager --help          显示此帮助信息"
-    echo "  ./ai-env-manager --version       显示版本信息"
+    echo "  ./ai-env-manager <供应商名称>           切换到指定供应商"
+    echo "  ./ai-env-manager --add-only <供应商>    添加API环境（不清除其他API）"
+    echo "  ./ai-env-manager --status              显示当前状态"
+    echo "  ./ai-env-manager --list                列出所有可用供应商"
+    echo "  ./ai-env-manager --validate            验证当前API环境配置"
+    echo "  ./ai-env-manager --help                显示此帮助信息"
+    echo "  ./ai-env-manager --version             显示版本信息"
+    echo ""
+    echo "多API并存模式："
+    echo "  支持OpenAI和Claude API同时配置，互不冲突"
+    echo "  使用 --add-only 选项可添加新API而不影响现有配置"
     echo ""
     echo "示例:"
+    echo "  # 传统模式（单API）"
     echo "  ./ai-env-manager openai-official"
     echo "  ./ai-env-manager claude-official"
-    echo "  ./ai-env-manager --status"
+    echo ""
+    echo "  # 多API并存模式"
+    echo "  source ./ai-env-manager deepseek           # 设置OpenAI API"
+    echo "  source ./ai-env-manager --add-only claude-official  # 添加Claude API"
+    echo "  ./ai-env-manager --status                  # 查看两个API状态"
     echo ""
     echo "配置文件: $CONFIG_FILE"
 }
@@ -184,6 +195,18 @@ main() {
             check_config_file
             list_vendors
             exit 0
+            ;;
+        --add-only)
+            if [[ -z "${2:-}" ]]; then
+                error_exit "缺少供应商名称" "使用: ./ai-env-manager --add-only <供应商名称>"
+            fi
+            check_config_file
+            add_vendor "$2"
+            ;;
+        --validate)
+            check_config_file
+            validate_multi_api_env
+            exit $?
             ;;
         "")
             show_help
@@ -291,6 +314,75 @@ validate_vendor_config() {
     fi
 }
 
+# 验证多API环境配置状态
+validate_multi_api_env() {
+    local openai_configured=false
+    local claude_configured=false
+    local validation_warnings=()
+    
+    # 检查OpenAI配置完整性
+    if [[ -n "$OPENAI_API_KEY" && -n "$OPENAI_BASE_URL" ]]; then
+        openai_configured=true
+        
+        # 验证OpenAI URL格式
+        if [[ ! "$OPENAI_BASE_URL" =~ ^https?://[a-zA-Z0-9.-]+[a-zA-Z0-9]+(:[0-9]+)?(/.*)?$ ]]; then
+            validation_warnings+=("OpenAI Base URL 格式可能无效: $OPENAI_BASE_URL")
+        fi
+        
+        # 检查API key格式（基本检查）
+        if [[ ${#OPENAI_API_KEY} -lt 10 ]]; then
+            validation_warnings+=("OpenAI API Key 长度过短，可能无效")
+        fi
+    elif [[ -n "$OPENAI_API_KEY" || -n "$OPENAI_BASE_URL" ]]; then
+        validation_warnings+=("OpenAI 配置不完整：需要同时设置 API Key 和 Base URL")
+    fi
+    
+    # 检查Claude配置完整性
+    if [[ -n "$ANTHROPIC_AUTH_TOKEN" && -n "$ANTHROPIC_BASE_URL" ]]; then
+        claude_configured=true
+        
+        # 验证Claude URL格式
+        if [[ ! "$ANTHROPIC_BASE_URL" =~ ^https?://[a-zA-Z0-9.-]+[a-zA-Z0-9]+(:[0-9]+)?(/.*)?$ ]]; then
+            validation_warnings+=("Claude Base URL 格式可能无效: $ANTHROPIC_BASE_URL")
+        fi
+        
+        # 检查Auth Token格式（基本检查）
+        if [[ ${#ANTHROPIC_AUTH_TOKEN} -lt 10 ]]; then
+            validation_warnings+=("Claude Auth Token 长度过短，可能无效")
+        fi
+    elif [[ -n "$ANTHROPIC_AUTH_TOKEN" || -n "$ANTHROPIC_BASE_URL" ]]; then
+        validation_warnings+=("Claude 配置不完整：需要同时设置 Auth Token 和 Base URL")
+    fi
+    
+    # 显示验证结果
+    if [[ "$openai_configured" == "false" && "$claude_configured" == "false" ]]; then
+        warning_msg "未检测到任何已配置的API环境"
+        return 1
+    fi
+    
+    # 显示警告信息
+    if [[ ${#validation_warnings[@]} -gt 0 ]]; then
+        warning_msg "配置验证发现以下问题："
+        for warning in "${validation_warnings[@]}"; do
+            echo -e "  ${YELLOW}⚠${NC} $warning"
+        done
+        return 2
+    fi
+    
+    # 显示成功信息
+    local configured_apis=()
+    [[ "$openai_configured" == "true" ]] && configured_apis+=("OpenAI")
+    [[ "$claude_configured" == "true" ]] && configured_apis+=("Claude")
+    
+    if [[ ${#configured_apis[@]} -eq 2 ]]; then
+        success_msg "多API环境验证通过：${configured_apis[1]} 和 ${configured_apis[2]} 都已正确配置"
+    else
+        success_msg "API环境验证通过：${configured_apis[1]} 已正确配置"
+    fi
+    
+    return 0
+}
+
 # 获取所有供应商列表
 get_vendors() {
     local vendors=""
@@ -389,9 +481,7 @@ set_openai_env() {
     local api_url="$2"
     local model="$3"
     
-    # 清理Claude环境变量以避免冲突
-    clear_claude_env
-    
+    # 不再清理Claude环境变量，支持多API并存
     export OPENAI_API_KEY="$api_key"
     export OPENAI_BASE_URL="$api_url"
     
@@ -406,55 +496,82 @@ set_claude_env() {
     local api_key="$1"
     local api_url="$2"
     
-    # 清理OpenAI环境变量以避免冲突
-    clear_openai_env
-    
+    # 不再清理OpenAI环境变量，支持多API并存
     export ANTHROPIC_AUTH_TOKEN="$api_key"
     export ANTHROPIC_BASE_URL="$api_url"
 }
 
-# 获取当前环境状态
+# 获取当前环境状态（支持多API并存）
 get_current_env_status() {
-    local env_status=""
+    local openai_status=""
+    local claude_status=""
+    local combined_status=""
     
+    # 检查OpenAI状态
     if [[ -n "$OPENAI_API_KEY" && -n "$OPENAI_BASE_URL" ]]; then
-        env_status="openai:$OPENAI_BASE_URL"
-    elif [[ -n "$ANTHROPIC_AUTH_TOKEN" && -n "$ANTHROPIC_BASE_URL" ]]; then
-        env_status="claude:$ANTHROPIC_BASE_URL"
-    else
-        env_status="none"
+        openai_status="openai:$OPENAI_BASE_URL"
     fi
     
-    echo "$env_status"
+    # 检查Claude状态
+    if [[ -n "$ANTHROPIC_AUTH_TOKEN" && -n "$ANTHROPIC_BASE_URL" ]]; then
+        claude_status="claude:$ANTHROPIC_BASE_URL"
+    fi
+    
+    # 组合状态信息
+    if [[ -n "$openai_status" && -n "$claude_status" ]]; then
+        combined_status="both:$openai_status,$claude_status"
+    elif [[ -n "$openai_status" ]]; then
+        combined_status="$openai_status"
+    elif [[ -n "$claude_status" ]]; then
+        combined_status="$claude_status"
+    else
+        combined_status="none"
+    fi
+    
+    echo "$combined_status"
 }
 
-# 显示当前状态
+# 显示当前状态（支持多API并行显示）
 show_status() {
-    local current_status=$(get_current_env_status)
-    
     echo "当前API环境状态："
     echo ""
     
-    case "$current_status" in
-        openai:*)
-            local url="${current_status#openai:}"
-            echo -e "  类型: ${GREEN}OpenAI${NC}"
-            echo -e "  Base URL: $url"
-            echo -e "  API Key: ${GREEN}已设置${NC} (***隐藏***)"
-            if [[ -n "$OPENAI_MODEL" ]]; then
-                echo -e "  模型: ${GREEN}$OPENAI_MODEL${NC}"
-            fi
-            ;;
-        claude:*)
-            local url="${current_status#claude:}"
-            echo -e "  类型: ${BLUE}Claude${NC}"
-            echo -e "  Base URL: $url"
-            echo -e "  Auth Token: ${GREEN}已设置${NC} (***隐藏***)"
-            ;;
-        none)
-            echo -e "  ${YELLOW}未设置任何API环境变量${NC}"
-            ;;
-    esac
+    # 显示OpenAI状态
+    if [[ -n "$OPENAI_API_KEY" && -n "$OPENAI_BASE_URL" ]]; then
+        echo -e "  ${GREEN}● OpenAI${NC}: 已配置"
+        echo -e "    Base URL: $OPENAI_BASE_URL"
+        echo -e "    API Key: ${GREEN}已设置${NC} (***隐藏***)"
+        if [[ -n "$OPENAI_MODEL" ]]; then
+            echo -e "    模型: ${GREEN}$OPENAI_MODEL${NC}"
+        fi
+    else
+        echo -e "  ${YELLOW}○ OpenAI${NC}: 未配置"
+    fi
+    
+    echo ""
+    
+    # 显示Claude状态
+    if [[ -n "$ANTHROPIC_AUTH_TOKEN" && -n "$ANTHROPIC_BASE_URL" ]]; then
+        echo -e "  ${GREEN}● Claude${NC}: 已配置"
+        echo -e "    Base URL: $ANTHROPIC_BASE_URL"
+        echo -e "    Auth Token: ${GREEN}已设置${NC} (***隐藏***)"
+    else
+        echo -e "  ${YELLOW}○ Claude${NC}: 未配置"
+    fi
+    
+    echo ""
+    
+    # 总体状态提示
+    local openai_configured=$([[ -n "$OPENAI_API_KEY" && -n "$OPENAI_BASE_URL" ]] && echo "true" || echo "false")
+    local claude_configured=$([[ -n "$ANTHROPIC_AUTH_TOKEN" && -n "$ANTHROPIC_BASE_URL" ]] && echo "true" || echo "false")
+    
+    if [[ "$openai_configured" == "true" && "$claude_configured" == "true" ]]; then
+        echo -e "${GREEN}✓ 两个API都已配置，可以同时使用${NC}"
+    elif [[ "$openai_configured" == "true" || "$claude_configured" == "true" ]]; then
+        echo -e "${BLUE}ℹ 一个API已配置，可以添加更多API环境${NC}"
+    else
+        echo -e "${YELLOW}⚠ 未配置任何API环境变量${NC}"
+    fi
     
     echo ""
     echo "环境变量详情："
@@ -463,6 +580,64 @@ show_status() {
     echo "  OPENAI_MODEL: ${OPENAI_MODEL:-未设置}"
     echo "  ANTHROPIC_AUTH_TOKEN: ${ANTHROPIC_AUTH_TOKEN:+已设置}"
     echo "  ANTHROPIC_BASE_URL: ${ANTHROPIC_BASE_URL:-未设置}"
+}
+
+# 仅添加供应商环境变量（不清除其他API）
+add_vendor() {
+    parse_config
+    
+    local vendor="$1"
+    
+    if ! vendor_exists "$vendor"; then
+        error_exit "未知的供应商: '$vendor'" "使用 './ai-env-manager --list' 查看可用供应商"
+    fi
+    
+    validate_vendor_config "$vendor"
+    
+    local type=$(get_vendor_config "$vendor" "type")
+    local api_key=$(get_vendor_config "$vendor" "api_key")
+    local api_url=$(get_vendor_config "$vendor" "api_url")
+    local model=$(get_vendor_config "$vendor" "model")
+    
+    # 根据类型添加相应的环境变量
+    case "$type" in
+        openai)
+            set_openai_env "$api_key" "$api_url" "$model"
+            success_msg "已添加 OpenAI 供应商: $vendor"
+            ;;
+        claude)
+            set_claude_env "$api_key" "$api_url"
+            success_msg "已添加 Claude 供应商: $vendor"
+            ;;
+        *)
+            error_exit "不支持的供应商类型: $type" "支持的类型: openai, claude"
+            ;;
+    esac
+    
+    echo ""
+    echo "新添加的环境配置："
+    echo "  类型: $type"
+    echo "  Base URL: $api_url"
+    echo "  API Key: ***隐藏***"
+    if [[ "$type" == "openai" && -n "$model" ]]; then
+        echo "  模型: $model"
+    fi
+    
+    echo ""
+    # 运行多API环境验证
+    validate_multi_api_env
+    
+    echo ""
+    info_msg "环境变量已添加，现有的其他API配置保持不变"
+    info_msg "使用 './ai-env-manager --status' 查看所有API状态"
+    echo ""
+    warning_msg "注意：要在当前shell中生效，请使用: source ./ai-env-manager --add-only $vendor"
+    
+    # 可选：显示性能信息
+    if [[ "${DEBUG:-}" == "1" ]]; then
+        info_msg "配置解析状态: $CONFIG_PARSED"
+        info_msg "配置项数量: ${#VENDOR_CONFIGS[@]}"
+    fi
 }
 
 switch_vendor() {
