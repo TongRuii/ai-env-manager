@@ -183,6 +183,393 @@ source ./ai-env-manager claude1
 DEBUG=1 ./ai-env-manager vendor1
 ```
 
+## 部署方案
+
+### 系统级部署
+
+#### 1. 全局安装部署
+
+将工具部署到系统路径，供所有用户使用：
+
+```bash
+# 1. 复制脚本到系统路径
+sudo cp ai-env-manager /usr/local/bin/
+sudo chmod +x /usr/local/bin/ai-env-manager
+
+# 2. 创建全局配置目录
+sudo mkdir -p /etc/ai-env-manager
+sudo cp vendors.conf /etc/ai-env-manager/
+
+# 3. 设置权限
+sudo chmod 600 /etc/ai-env-manager/vendors.conf  # 保护敏感信息
+sudo chmod 755 /etc/ai-env-manager/               # 配置目录权限
+```
+
+**使用方式**：
+```bash
+# 全局使用
+ai-env-manager --list
+ai-env-manager openai-official
+```
+
+#### 2. 用户级部署
+
+为单个用户安装，避免使用sudo权限：
+
+```bash
+# 1. 创建用户bin目录
+mkdir -p ~/bin
+
+# 2. 复制脚本
+cp ai-env-manager ~/bin/
+chmod +x ~/bin/ai-env-manager
+
+# 3. 添加到PATH（如果还没有）
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc
+source ~/.zshrc
+
+# 4. 创建用户配置目录
+mkdir -p ~/.config/ai-env-manager
+cp vendors.conf ~/.config/ai-env-manager/
+chmod 600 ~/.config/ai-env-manager/vendors.conf
+```
+
+### 开发环境部署
+
+#### 1. 项目级部署
+
+集成到开发项目中，通过版本控制管理：
+
+```bash
+# 1. 添加到项目根目录
+cp ai-env-manager ./project-root/
+cp vendors.conf ./project-root/
+
+# 2. 添加到.gitignore（保护敏感信息）
+echo "vendors.conf" >> .gitignore
+echo "*.key" >> .gitignore
+echo "*.secret" >> .gitignore
+
+# 3. 创建模板配置文件
+cp vendors.conf vendors.conf.template
+git add vendors.conf.template
+```
+
+**项目结构**：
+```
+project-root/
+├── ai-env-manager           # 环境管理工具
+├── vendors.conf            # 实际配置（不提交）
+├── vendors.conf.template   # 配置模板（提交）
+├── .env.example           # 环境变量示例
+└── .gitignore             # Git忽略规则
+```
+
+#### 2. Docker容器部署
+
+在Docker容器中使用环境管理：
+
+```dockerfile
+# Dockerfile
+FROM ubuntu:22.04
+
+# 安装必要工具
+RUN apt-get update && apt-get install -y \
+    zsh \
+    curl \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# 复制环境管理工具
+COPY ai-env-manager /usr/local/bin/
+RUN chmod +x /usr/local/bin/ai-env-manager
+
+# 创建配置目录
+RUN mkdir -p /etc/ai-env-manager
+
+# 设置工作目录
+WORKDIR /app
+
+# 复制配置模板
+COPY vendors.conf.template /etc/ai-env-manager/
+```
+
+**docker-compose.yml**：
+```yaml
+version: '3.8'
+services:
+  ai-app:
+    build: .
+    volumes:
+      - ./vendors.conf:/etc/ai-env-manager/vendors.conf:ro
+    environment:
+      - CONFIG_PATH=/etc/ai-env-manager/vendors.conf
+    command: ["/bin/zsh"]
+```
+
+### 自动化部署
+
+#### 1. 脚本自动化部署
+
+使用提供的部署脚本进行自动化安装：
+
+```bash
+# 运行部署脚本
+./deploy.sh
+
+# 或者指定安装类型
+./deploy.sh --user      # 用户级安装
+./deploy.sh --system    # 系统级安装
+./deploy.sh --project   # 项目级安装
+```
+
+#### 2. CI/CD集成
+
+在持续集成流程中使用：
+
+```yaml
+# .github/workflows/ci.yml
+name: CI
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Setup AI Environment
+        run: |
+          source ./ai-env-manager test-vendor
+          ./ai-env-manager --validate
+      
+      - name: Run Tests
+        run: |
+          ./test_switch_api_env.sh
+          ./test_e2e.sh
+```
+
+### 云服务部署
+
+#### 1. AWS部署
+
+在AWS EC2实例上部署：
+
+```bash
+# 1. 连接到EC2实例
+ssh -i your-key.pem ec2-user@your-instance
+
+# 2. 下载并安装工具
+wget https://raw.githubusercontent.com/your-repo/ai-env-manager/main/ai-env-manager
+chmod +x ai-env-manager
+sudo mv ai-env-manager /usr/local/bin/
+
+# 3. 使用AWS Secrets Manager管理API密钥
+aws secretsmanager get-secret-value --secret-id ai-api-keys --query SecretString --output text > /tmp/secrets.json
+```
+
+#### 2. Kubernetes部署
+
+在Kubernetes集群中使用：
+
+```yaml
+# configmap.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ai-env-config
+data:
+  vendors.conf.template: |
+    [test-vendor]
+    type=openai
+    api_key=${API_KEY}
+    api_url=${API_URL}
+    model=gpt-3.5-turbo
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: ai-api-secrets
+type: Opaque
+data:
+  api-key: eW91ci1hY3R1YWwtYXBpLWtleQ==
+```
+
+### 配置管理策略
+
+#### 1. 环境隔离
+
+为不同环境创建独立的配置：
+
+```bash
+# 开发环境
+vendors.dev.conf
+./ai-env-manager --config vendors.dev.conf dev-openai
+
+# 测试环境
+vendors.test.conf
+./ai-env-manager --config vendors.test.conf test-openai
+
+# 生产环境
+vendors.prod.conf
+./ai-env-manager --config vendors.prod.conf prod-openai
+```
+
+#### 2. 配置版本控制
+
+使用Git管理配置变更：
+
+```bash
+# 创建配置分支
+git checkout -b config/v2.0
+
+# 添加配置文件
+git add vendors.conf.template
+git commit -m "Add vendor configuration template"
+
+# 标记版本
+git tag config-v2.0
+```
+
+### 监控和日志
+
+#### 1. 使用日志
+
+启用日志记录环境切换：
+
+```bash
+# 设置日志文件
+export AI_ENV_LOG_FILE="/var/log/ai-env-manager.log"
+export AI_ENV_LOG_LEVEL="INFO"
+
+# 使用工具
+./ai-env-manager production-vendor
+```
+
+#### 2. 监控脚本
+
+创建监控脚本检查API状态：
+
+```bash
+#!/bin/bash
+# monitor.sh - 监控API环境状态
+
+LOG_FILE="/var/log/ai-env-monitor.log"
+TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S')
+
+echo "[$TIMESTAMP] Checking API environment status..." >> $LOG_FILE
+
+# 检查环境变量
+if [ -n "$OPENAI_API_KEY" ]; then
+    echo "[$TIMESTAMP] OpenAI API: Configured" >> $LOG_FILE
+else
+    echo "[$TIMESTAMP] OpenAI API: Not configured" >> $LOG_FILE
+fi
+
+if [ -n "$ANTHROPIC_AUTH_TOKEN" ]; then
+    echo "[$TIMESTAMP] Claude API: Configured" >> $LOG_FILE
+else
+    echo "[$TIMESTAMP] Claude API: Not configured" >> $LOG_FILE
+fi
+```
+
+### 安全最佳实践
+
+#### 1. 权限管理
+
+```bash
+# 限制配置文件权限
+chmod 600 vendors.conf
+
+# 设置脚本执行权限
+chmod 700 ai-env-manager
+
+# 使用ACL控制访问
+setfacl -m u:www-data:r vendors.conf
+```
+
+#### 2. 密钥轮换
+
+定期更新API密钥：
+
+```bash
+#!/bin/bash
+# rotate-keys.sh - API密钥轮换脚本
+
+# 备份当前配置
+cp vendors.conf vendors.conf.backup.$(date +%Y%m%d)
+
+# 生成新密钥（示例）
+NEW_KEY=$(openssl rand -hex 32)
+
+# 更新配置文件
+sed -i "s/api_key=.*/api_key=$NEW_KEY/" vendors.conf
+
+echo "API密钥已更新: $(date)"
+```
+
+### 备份和恢复
+
+#### 1. 配置备份
+
+```bash
+#!/bin/bash
+# backup-config.sh - 配置备份脚本
+
+BACKUP_DIR="/backups/ai-env-manager"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+mkdir -p $BACKUP_DIR
+
+# 备份配置文件
+cp vendors.conf $BACKUP_DIR/vendors.conf.$DATE
+
+# 备份脚本
+cp ai-env-manager $BACKUP_DIR/ai-env-manager.$DATE
+
+# 创建压缩包
+tar -czf $BACKUP_DIR/backup_$DATE.tar.gz -C $BACKUP_DIR vendors.conf.$DATE ai-env-manager.$DATE
+
+# 清理临时文件
+rm $BACKUP_DIR/vendors.conf.$DATE $BACKUP_DIR/ai-env-manager.$DATE
+
+echo "备份完成: $BACKUP_DIR/backup_$DATE.tar.gz"
+```
+
+#### 2. 灾难恢复
+
+```bash
+#!/bin/bash
+# restore-config.sh - 灾难恢复脚本
+
+BACKUP_FILE=$1
+RESTORE_DIR="/tmp/restore"
+
+if [ -z "$BACKUP_FILE" ]; then
+    echo "使用方法: $0 <backup_file>"
+    exit 1
+fi
+
+# 创建恢复目录
+mkdir -p $RESTORE_DIR
+
+# 解压备份文件
+tar -xzf $BACKUP_FILE -C $RESTORE_DIR
+
+# 恢复配置文件
+cp $RESTORE_DIR/vendors.conf.* ./vendors.conf
+cp $RESTORE_DIR/ai-env-manager.* ./ai-env-manager
+
+# 设置权限
+chmod 600 vendors.conf
+chmod +x ai-env-manager
+
+# 清理临时文件
+rm -rf $RESTORE_DIR
+
+echo "恢复完成"
+```
+
 ## 测试
 
 运行测试套件：
@@ -207,5 +594,97 @@ DEBUG=1 ./ai-env-manager vendor1
 ├── README.md                  # 使用文档
 ├── MIGRATION.md               # 迁移指南
 ├── test_switch_api_env.sh     # 单元测试
-└── test_e2e.sh               # 端到端测试
+├── test_e2e.sh               # 端到端测试
+├── demo.sh                   # 演示脚本
+├── git_commit.sh             # Git提交脚本
+└── deploy.sh                 # 部署脚本（建议创建）
 ```
+
+## 快速开始
+
+### 1. 克隆或下载项目
+
+```bash
+# 克隆项目
+git clone <repository-url>
+cd ai-env-manager
+
+# 或直接下载文件
+wget https://raw.githubusercontent.com/your-repo/ai-env-manager/main/ai-env-manager
+wget https://raw.githubusercontent.com/your-repo/ai-env-manager/main/vendors.conf
+```
+
+### 2. 基本配置
+
+```bash
+# 设置执行权限
+chmod +x ai-env-manager
+
+# 编辑配置文件
+nano vendors.conf
+```
+
+### 3. 验证安装
+
+```bash
+# 列出可用供应商
+./ai-env-manager --list
+
+# 检查状态
+./ai-env-manager --status
+```
+
+## 贡献指南
+
+欢迎提交问题报告和功能请求！
+
+### 开发流程
+
+1. Fork 项目
+2. 创建功能分支：`git checkout -b feature/new-feature`
+3. 提交更改：`git commit -am 'Add new feature'`
+4. 推送到分支：`git push origin feature/new-feature`
+5. 提交 Pull Request
+
+### 代码规范
+
+- 使用 4 空格缩进
+- 添加适当的注释
+- 确保脚本兼容 bash 和 zsh
+- 遵循现有的代码风格
+
+## 许可证
+
+本项目采用 MIT 许可证。详见 [LICENSE](LICENSE) 文件。
+
+## 更新日志
+
+### v2.0.0 (2024-01-XX)
+- ✨ 新增多API并存功能
+- 🔄 支持OpenAI和Claude API同时配置
+- 🛡️ 自动环境变量冲突清理
+- 📊 增强的状态显示功能
+- 🧪 完整的测试套件
+- 📦 完善的部署方案
+
+### v1.0.0 (2023-12-XX)
+- 🎉 初始版本发布
+- 🔧 基本的API供应商切换功能
+- 📝 配置文件支持
+- ✅ 配置验证和错误处理
+
+## 支持
+
+如果您遇到问题或有建议，请：
+
+1. 查看 [故障排除](#故障排除) 部分
+2. 提交 [Issue](https://github.com/your-repo/ai-env-manager/issues)
+3. 查看 [Wiki](https://github.com/your-repo/ai-env-manager/wiki) 获取更多文档
+
+## 致谢
+
+感谢所有贡献者和用户的反馈与支持！
+
+---
+
+**⚠️ 安全提示**：请妥善保管您的API密钥，不要将其提交到版本控制系统或在不安全的环境中分享。
