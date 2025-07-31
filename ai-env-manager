@@ -14,8 +14,8 @@
 
 # 配置文件路径
 CONFIG_FILE="vendors.conf"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_PATH="${SCRIPT_DIR}/${CONFIG_FILE}"
+CONFIG_DIR="$HOME/.ai-env-manager"
+CONFIG_PATH="${CONFIG_DIR}/${CONFIG_FILE}"
 
 # 颜色定义
 RED='\033[0;31m'
@@ -65,6 +65,11 @@ check_config_file() {
 
 # 创建模板配置文件
 create_template_config() {
+    # 确保配置目录存在
+    if [[ ! -d "$CONFIG_DIR" ]]; then
+        mkdir -p "$CONFIG_DIR" || return 1
+    fi
+    
     cat > "$CONFIG_PATH" << 'EOF'
 # API供应商配置文件
 # 格式: [供应商名称]
